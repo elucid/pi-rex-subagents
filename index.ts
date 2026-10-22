@@ -18,10 +18,11 @@ import { join } from "node:path";
 import { markSubagentActive, markSubagentInactive } from "./src/active.ts";
 import { discoverAgentDefinitions, getAgentConfigDir, loadAgentDefinition } from "./src/agents.ts";
 import { buildSteer, formatElapsed, renderPing, renderResult, type RunningChild } from "./src/messages.ts";
-import { createRexClient, insideRex, type RexClient } from "./src/rex.ts";
+import { createRexClient, insideRex, type ProgramStatus, type RexClient } from "./src/rex.ts";
 import { getSessionId } from "./src/seed.ts";
 import { type ChildPlan, materialize, planResume, planSpawn } from "./src/spawn.ts";
 import { watchChild } from "./src/watcher.ts";
+import { renderWidgetLines, type WidgetRow } from "./src/widget.ts";
 
 // ── state ───────────────────────────────────────────────────────────────────
 
@@ -35,27 +36,38 @@ const fail = (text: string) => ({ content: [{ type: "text" as const, text }], de
 
 // ── widget: running children ────────────────────────────────────────────────
 
+const statusCache = new Map<string, ProgramStatus | null>();
+
+function widgetRows(): WidgetRow[] {
+  return [...running.values()].map((c) => ({ name: c.name, agent: c.agent, startTime: c.startTime, status: statusCache.get(c.blockId) ?? null }));
+}
+
+/** One cheap `rex` call per running child; results land on the next render. */
+async function pollStatuses(): Promise<void> {
+  await Promise.all([...running.values()].map(async (c) => statusCache.set(c.blockId, await rex.programStatus(c.blockId))));
+}
+
 function refreshWidget(): void {
   if (!ui) return;
   if (running.size === 0) {
     ui.setWidget("rex-subagents", undefined);
     if (widgetTimer) clearInterval(widgetTimer);
     widgetTimer = null;
+    statusCache.clear();
     return;
   }
-  const now = Date.now();
   ui.setWidget(
     "rex-subagents",
-    (_tui: unknown, theme: any) => {
-      const rows = [...running.values()].map((c) => {
-        const tag = c.agent ? theme.fg("dim", ` (${c.agent})`) : "";
-        return `${theme.fg("accent", "▸")} ${theme.bold(c.name)}${tag} ${theme.fg("dim", formatElapsed(Math.floor((now - c.startTime) / 1000)))}`;
-      });
-      return new Text(`${theme.fg("dim", `subagents running: ${running.size}`)}\n${rows.join("\n")}`, 0, 0);
-    },
+    (_tui: unknown, theme: any) => ({
+      invalidate() {},
+      render: (width: number) => renderWidgetLines(widgetRows(), width, theme),
+    }),
     { placement: "aboveEditor" },
   );
-  if (!widgetTimer) widgetTimer = setInterval(refreshWidget, 1000);
+  if (!widgetTimer) {
+    widgetTimer = setInterval(() => void pollStatuses().then(refreshWidget), 1000);
+    void pollStatuses().then(refreshWidget);
+  }
 }
 
 // ── launch + watch ──────────────────────────────────────────────────────────

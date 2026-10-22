@@ -48,6 +48,14 @@ export type WaitResult =
   | { kind: "closed" } // block closed before its program reported an exit
   | { kind: "lost"; message: string }; // server gone / wait failed for another reason
 
+/** One Program Status Protocol (OSC 7501) record, as reported by the block's program. */
+export interface ProgramStatus {
+  state: "idle" | "working" | "done" | "blocked" | "error";
+  kind?: "permission" | "question" | "auth";
+  msg?: string;
+  app?: string;
+}
+
 export interface RexClient {
   split(p: SplitParams): Promise<{ blockId: string }>;
   wait(blockId: string, signal?: AbortSignal): Promise<WaitResult>;
@@ -56,6 +64,8 @@ export interface RexClient {
   rename(blockId: string, label: string): Promise<void>;
   sendKey(blockId: string, key: string): Promise<void>;
   exists(blockId: string): Promise<boolean>;
+  /** The program's root status record, or null if none / block gone. */
+  programStatus(blockId: string): Promise<ProgramStatus | null>;
 }
 
 type Exec = (
@@ -159,6 +169,19 @@ export function createRexClient(opts: { bin?: string; exec?: Exec } = {}): RexCl
     async exists(blockId) {
       const r = await exec(bin, ["block", "inspect", blockId, "--json"]);
       return r.code === 0;
+    },
+
+    async programStatus(blockId) {
+      const r = await exec(bin, ["block", "call", "-b", blockId, "program_status"]);
+      if (r.code !== 0) return null;
+      try {
+        const records: any[] = JSON.parse(r.stdout).records ?? [];
+        const root = records.find((x) => !x.id) ?? records[0];
+        if (!root?.state) return null;
+        return { state: root.state, kind: root.kind, msg: root.msg, app: root.app ?? root.effective_app };
+      } catch {
+        return null;
+      }
     },
   };
 }
