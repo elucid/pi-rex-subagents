@@ -95,7 +95,8 @@ export function planSpawn(params: SpawnParams, def: AgentDefinition | null, ctx:
   const { sessionDir } = resolveChildSessionDir(cwd);
   const sessionFile = join(sessionDir, `${now.toISOString().replace(/[:.]/g, "-")}_${randomUUID()}.jsonl`);
 
-  const autoExit = params.autoExit ?? def?.autoExit ?? false;
+  // Bare spawns are autonomous by default; agent defs and /iterate say otherwise explicitly.
+  const autoExit = params.autoExit ?? def?.autoExit ?? true;
   const sessionMode = params.fork ? "fork" : (def?.sessionMode ?? "standalone");
   const files: ChildPlan["files"] = [];
 

@@ -154,6 +154,13 @@ function registerTools(pi: ExtensionAPI, denied: Set<string>): void {
       label: "Subagent",
       description: `Spawn a sub-agent (a new pi) in a Rex pane beside you. ${ASYNC_NOTE}`,
       promptSnippet: "Spawn a sub-agent in a Rex pane; its result arrives later as a steer message.",
+      promptGuidelines: [
+        "Sub-agents run in their own Rex pane beside you and close that pane themselves when done (autoExit defaults to true, " +
+          "unless the agent definition says auto-exit: false). When the user wants to keep interacting with a sub-agent in its " +
+          "pane (review, pairing, 'leave it open'), pass autoExit: false; it then ends only when it calls subagent_done or the user quits it.",
+        "Prefer a named agent definition (subagents_list) when one fits; any field (model, thinking, tools, autoExit, cwd) can be " +
+          "overridden per call. Results always arrive as a steer message with the child's session path, which subagent_resume can continue.",
+      ],
       parameters: SubagentParams,
       async execute(_id, params, _signal, _update, ctx) {
         const me = process.env.PI_SUBAGENT_AGENT;
