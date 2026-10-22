@@ -1,0 +1,20 @@
+{
+  "name": "pi-rex-subagents",
+  "version": "0.1.0",
+  "description": "Subagent orchestration for pi inside the Rex multiplexer: spawn pi children in Rex blocks via exact argv, get their handoff back as a steer message",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "author": "Justin Giancola",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
