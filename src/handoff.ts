@@ -51,8 +51,13 @@ function isHandoff(v: unknown): v is Handoff {
   }
 }
 
-/** Parse a child session file. Tolerates a missing file (launch failure) and bad lines. */
-export function readChildTranscript(sessionFile: string): ChildTranscript {
+/**
+ * Parse a child session file, considering only entries after `afterLine` non-blank
+ * lines. The caller records the line count when it starts the child, so seeded
+ * parent content (fork mode) and a previous run's handoff (resume) are never
+ * mistaken for this run's output. Tolerates a missing file and bad lines.
+ */
+export function readChildTranscript(sessionFile: string, afterLine = 0): ChildTranscript {
   let raw: string;
   try {
     raw = readFileSync(sessionFile, "utf8");
@@ -64,8 +69,10 @@ export function readChildTranscript(sessionFile: string): ChildTranscript {
   let lastAssistantText: string | null = null;
   let messageCount = 0;
 
+  let seen = 0;
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
+    if (seen++ < afterLine) continue;
     let entry: any;
     try {
       entry = JSON.parse(line);

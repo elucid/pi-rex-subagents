@@ -18,10 +18,12 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import { activeSubagentCount } from "./src/active.ts";
 import { HANDOFF_TYPE, HANDOFF_VERSION, type ContextUsageSnapshot, type Handoff } from "./src/handoff.ts";
+
+type DistributiveOmit<T, K extends keyof any> = T extends unknown ? Omit<T, K> : never;
 
 /**
  * Auto-exit only after a turn that ended cleanly. A turn ending on a user message
@@ -58,10 +60,10 @@ export default function (pi: ExtensionAPI) {
   }
 
   /** Append the handoff entry exactly once; later callers (agent_end after subagent_done, shutdown) no-op. */
-  function writeHandoff(data: Omit<Handoff, "version">): void {
+  function writeHandoff(data: DistributiveOmit<Handoff, "version">): void {
     if (handoffWritten) return;
     handoffWritten = true;
-    pi.appendEntry(HANDOFF_TYPE, { version: HANDOFF_VERSION, ...data } as Handoff);
+    pi.appendEntry<Handoff>(HANDOFF_TYPE, { version: HANDOFF_VERSION, ...data } as Handoff);
   }
 
   pi.on("session_start", (_e, ctx) => {

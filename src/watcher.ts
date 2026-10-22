@@ -19,13 +19,13 @@ export type Outcome =
 
 export async function watchChild(
   rex: RexClient,
-  child: { blockId: string; sessionFile: string },
+  child: { blockId: string; sessionFile: string; transcriptStartLine?: number },
   signal?: AbortSignal,
 ): Promise<Outcome> {
   const result = await rex.wait(child.blockId, signal);
   if (signal?.aborted) return { kind: "cancelled" };
 
-  const t = readChildTranscript(child.sessionFile);
+  const t = readChildTranscript(child.sessionFile, child.transcriptStartLine ?? 0);
 
   switch (result.kind) {
     case "closed":
