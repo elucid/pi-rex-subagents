@@ -21,10 +21,15 @@ const mmss = (startTime: number, now: number): string => {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 };
 
-/** Plain-text status label; `blocked` says why. */
+/**
+ * Plain-text status label. pi reports `done` when a turn finished and it is waiting
+ * for the next prompt — on a child that is still running, that means "waiting for
+ * the user". `blocked` is pi's own dialogs/logins, and `kind` says which.
+ */
 export function statusLabel(st: ProgramStatus | null): string {
   if (!st) return "starting";
   if (st.state === "blocked") return st.kind ? `blocked: ${st.kind}` : "blocked";
+  if (st.state === "done") return "waiting for user";
   return st.state;
 }
 
@@ -33,7 +38,7 @@ function statusColor(st: ProgramStatus | null): string {
     case "working": return "accent";
     case "blocked": return "warning";
     case "error": return "error";
-    case "done": return "success";
+    case "done": return "warning";
     default: return "dim";
   }
 }
