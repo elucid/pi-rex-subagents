@@ -21,7 +21,7 @@ import { buildSteer, formatElapsed, renderPing, renderResult, type RunningChild 
 import { createRexClient, insideRex, type ProgramStatus, type RexClient } from "./src/rex.ts";
 import { getSessionId } from "./src/seed.ts";
 import { type ChildPlan, materialize, planResume, planSpawn } from "./src/spawn.ts";
-import { watchChild } from "./src/watcher.ts";
+import { classifyGoneChild, type Outcome, watchChild } from "./src/watcher.ts";
 import { renderWidgetLines, type WidgetRow } from "./src/widget.ts";
 
 // ── state ───────────────────────────────────────────────────────────────────
@@ -82,6 +82,40 @@ function planContext(ctx: any) {
   };
 }
 
+/**
+ * Each spawn is recorded in the orchestrator's own session (not model context),
+ * and marked settled once its steer is delivered. On session_start the
+ * difference is re-attached, so /reload and `pi --session` resume never orphan a
+ * running child or lose a result that landed while nobody was watching.
+ */
+const RUNNING_TYPE = "subagent-running";
+const SETTLED_TYPE = "subagent-settled";
+
+type ChildRecord = RunningChild & { transcriptStartLine: number };
+
+function deliver(pi: ExtensionAPI, child: RunningChild, outcome: Outcome): void {
+  const msg = buildSteer(child, outcome, { sessionId: getSessionId(child.sessionFile) });
+  if (!msg) return; // cancelled: we are shutting down; leave the record unsettled for re-attach
+  pi.appendEntry(SETTLED_TYPE, { id: child.id, blockId: child.blockId });
+  pi.sendMessage(msg, { triggerTurn: true, deliverAs: "steer" });
+}
+
+function armWatcher(pi: ExtensionAPI, rec: ChildRecord): void {
+  const child = { ...rec, abort: new AbortController() };
+  running.set(child.id, child);
+  markSubagentActive(child.id);
+  refreshWidget();
+
+  void watchChild(rex, { blockId: rec.blockId, sessionFile: rec.sessionFile, transcriptStartLine: rec.transcriptStartLine }, child.abort.signal)
+    .then((outcome) => deliver(pi, child, outcome))
+    .catch((e: any) => deliver(pi, child, { kind: "lost", message: String(e?.message ?? e), lastMessage: null }))
+    .finally(() => {
+      running.delete(child.id);
+      markSubagentInactive(child.id);
+      refreshWidget();
+    });
+}
+
 async function launch(pi: ExtensionAPI, plan: ChildPlan, task: string): Promise<ReturnType<typeof ok>> {
   const p = materialize(plan);
   let blockId: string;
@@ -100,27 +134,12 @@ async function launch(pi: ExtensionAPI, plan: ChildPlan, task: string): Promise<
   }
 
   const id = blockId.slice(-6);
-  const child = { id, name: p.name, agent: p.agent, task, blockId, sessionFile: p.sessionFile, startTime: Date.now(), command: p.command, abort: new AbortController() };
-  running.set(id, child);
-  markSubagentActive(id);
-  refreshWidget();
-
-  void watchChild(rex, { blockId, sessionFile: p.sessionFile, transcriptStartLine: p.transcriptStartLine }, child.abort.signal)
-    .then((outcome) => {
-      const msg = buildSteer(child, outcome, { sessionId: getSessionId(p.sessionFile) });
-      if (msg) pi.sendMessage(msg, { triggerTurn: true, deliverAs: "steer" });
-    })
-    .catch((e: any) => {
-      pi.sendMessage(
-        { customType: "subagent_result", content: `Sub-agent "${p.name}" watcher error: ${e?.message ?? e}`, display: true, details: { name: p.name, error: String(e?.message ?? e) } },
-        { triggerTurn: true, deliverAs: "steer" },
-      );
-    })
-    .finally(() => {
-      running.delete(id);
-      markSubagentInactive(id);
-      refreshWidget();
-    });
+  const rec: ChildRecord = {
+    id, name: p.name, agent: p.agent, task, blockId, sessionFile: p.sessionFile,
+    startTime: Date.now(), command: p.command, transcriptStartLine: p.transcriptStartLine,
+  };
+  pi.appendEntry(RUNNING_TYPE, rec);
+  armWatcher(pi, rec);
 
   return ok(
     `Sub-agent "${p.name}" is running in Rex block ${blockId} (id ${id}). ` +
@@ -128,6 +147,28 @@ async function launch(pi: ExtensionAPI, plan: ChildPlan, task: string): Promise<
       "until then, work on other things or end your turn.",
     { id, name: p.name, agent: p.agent, blockId, sessionFile: p.sessionFile, autoExit: p.autoExit, status: "started" },
   );
+}
+
+/** Children recorded in this session that never got a settled entry. */
+function unsettledChildren(entries: any[]): ChildRecord[] {
+  const started = new Map<string, ChildRecord>();
+  for (const e of entries) {
+    if (e?.type !== "custom") continue;
+    if (e.customType === RUNNING_TYPE && e.data?.blockId) started.set(e.data.blockId, e.data as ChildRecord);
+    if (e.customType === SETTLED_TYPE && e.data?.blockId) started.delete(e.data.blockId);
+  }
+  return [...started.values()];
+}
+
+async function reattach(pi: ExtensionAPI, entries: any[]): Promise<void> {
+  for (const rec of unsettledChildren(entries)) {
+    if (running.has(rec.id)) continue;
+    if (await rex.exists(rec.blockId)) {
+      armWatcher(pi, rec); // rex wait returns at once if the program already exited
+    } else {
+      deliver(pi, { ...rec }, classifyGoneChild(rec));
+    }
+  }
 }
 
 // ── tools ───────────────────────────────────────────────────────────────────
@@ -305,6 +346,9 @@ export default function rexSubagents(pi: ExtensionAPI) {
   pi.on("session_start", (_e, ctx) => {
     ui = ctx.hasUI ? ctx.ui : null;
     refreshWidget();
+    void reattach(pi, ctx.sessionManager.getEntries() as any[]).catch((e: any) => {
+      ui?.notify(`pi-rex-subagents: re-attach failed: ${e?.message ?? e}`, "warning");
+    });
   });
 
   pi.on("session_shutdown", () => {
