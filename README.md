@@ -104,7 +104,8 @@ session-mode: standalone   # or lineage-only / fork
 Role instructions…
 ```
 
-Also honoured: `skills`, `deny-tools`, `cwd`, `disable-model-invocation`. Without
+Also honoured: `skills` (named in the task text as skills to read first; not injected),
+`deny-tools`, `cwd`, `disable-model-invocation`. Without
 any definitions, bare `subagent({name, task, …})` still works with pi's defaults.
 Definitions are read on each call, so edits apply to the next spawn.
 

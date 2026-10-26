@@ -186,7 +186,7 @@ const SubagentParams = Type.Object({
   systemPrompt: Type.Optional(Type.String({ description: "Role instructions (used when no agent is given)" })),
   model: Type.Optional(Type.String({ description: "Model override in provider/id form, e.g. 'anthropic/claude-opus-5-5'" })),
   thinking: Type.Optional(Type.String({ description: "Thinking level override: off, minimal, low, medium, high, xhigh, max" })),
-  skills: Type.Optional(Type.String({ description: "Comma-separated skills (overrides the agent's)" })),
+  skills: Type.Optional(Type.String({ description: "Comma-separated skills the sub-agent is told to read before starting (overrides the agent's)" })),
   tools: Type.Optional(Type.String({ description: "Comma-separated tool allowlist (overrides the agent's)" })),
   cwd: Type.Optional(Type.String({ description: "Working directory for the sub-agent (default: yours)" })),
   fork: Type.Optional(Type.Boolean({ description: "Fork this conversation: the sub-agent starts with your full context" })),

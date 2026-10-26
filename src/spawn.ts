@@ -79,13 +79,15 @@ function toolAllowlist(tools: string | undefined): string | null {
   return [...new Set([...requested, ...CHILD_CONTROL_TOOLS])].join(",");
 }
 
-/** `/skill:x` prompts must be separate positional messages; the task comes last. */
-function promptArgs(skills: string | undefined, task: string, viaArtifact: boolean): string[] {
-  const skillPrompts = (skills ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((s) => `/skill:${s}`);
-  // With an @file task, pi folds the first positional into the file message, which
-  // would swallow a leading /skill: — an empty first message keeps them separate.
-  const sep = viaArtifact && skillPrompts.length ? [""] : [];
-  return [...sep, ...skillPrompts, task];
+/**
+ * Skills are named in the task text, not sent as `/skill:x` prompts. Pi sends an `@file`
+ * message before any other positional, so separate skill prompts arrived as a second turn
+ * after the task had already run. The child's system prompt lists every skill with its
+ * path, so naming them is enough.
+ */
+function skillsLine(skills: string | undefined): string | null {
+  const names = (skills ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return names.length ? `Before starting, read these skills from your available skills: ${names.join(", ")}.` : null;
 }
 
 export function planSpawn(params: SpawnParams, def: AgentDefinition | null, ctx: PlanContext): ChildPlan {
@@ -112,11 +114,13 @@ export function planSpawn(params: SpawnParams, def: AgentDefinition | null, ctx:
   const role = def?.body ?? params.systemPrompt;
   const roleInSystemPrompt = Boolean(def?.systemPromptMode && role);
 
+  const skills = skillsLine(params.skills ?? def?.skills);
   let taskArg: string;
   if (sessionMode === "fork") {
-    taskArg = params.task; // the child already has the conversation
+    // the child already has the conversation
+    taskArg = [skills, params.task].filter(Boolean).join("\n\n");
   } else {
-    const text = [!roleInSystemPrompt && role, modeHint, params.task, handoffHint].filter(Boolean).join("\n\n");
+    const text = [!roleInSystemPrompt && role, modeHint, skills, params.task, handoffHint].filter(Boolean).join("\n\n");
     const file = join(ctx.artifactDir, "context", `${name}-${stamp(now)}.md`);
     files.push({ path: file, content: text });
     taskArg = `@${file}`;
@@ -135,7 +139,7 @@ export function planSpawn(params: SpawnParams, def: AgentDefinition | null, ctx:
   }
   const allow = toolAllowlist(params.tools ?? def?.tools);
   if (allow) pi.push("--tools", allow);
-  pi.push(...promptArgs(params.skills ?? def?.skills, taskArg, sessionMode !== "fork"));
+  pi.push(taskArg);
 
   const exports = childExports({ name: params.name, agent: params.agent, autoExit, denyTools: resolveDenyTools(def) });
 
