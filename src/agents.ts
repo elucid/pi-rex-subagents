@@ -1,7 +1,7 @@
 // Agent definitions: `~/.pi/agent/agents/*.md` and `.pi/agents/*.md` with YAML-ish
 // frontmatter. The field names and the line-regex parser follow
 // pi-interactive-subagents (MIT, HazAT) so existing definitions keep working.
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -118,12 +118,35 @@ export function resolveChildCwd(paramCwd: string | undefined, def: AgentDefiniti
  * Where pi would store sessions for `cwd` — the same encoding pi uses, so a child's
  * session shows up in `pi --session` listings for its project. Prefers a project-local
  * `.pi/agent` when one exists.
+ *
+ * `PI_CODING_AGENT_SESSION_DIR` (pi's own override) is honoured the way pi honours it,
+ * except that `PI_SESSION_DIR_SCOPE`, when set, limits it to child cwds under that
+ * prefix. A wrapper that pools one project's sessions sets both; the child's session
+ * file is picked here before the child (and its wrapper) starts, so without the scope a
+ * child spawned outside the project would land in the project's folder.
  */
-export function resolveChildSessionDir(cwd: string): { sessionDir: string; agentDir: string } {
+export function resolveChildSessionDir(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { sessionDir: string; agentDir: string } {
   const local = join(cwd, ".pi", "agent");
   const agentDir = existsSync(local) ? local : getAgentConfigDir();
+  const override = existsSync(local) ? undefined : sessionDirOverride(cwd, env);
   const safe = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
-  const sessionDir = join(agentDir, "sessions", safe);
+  const sessionDir = override ?? join(agentDir, "sessions", safe);
   mkdirSync(sessionDir, { recursive: true });
   return { sessionDir, agentDir };
+}
+
+function sessionDirOverride(cwd: string, env: NodeJS.ProcessEnv): string | undefined {
+  const dir = env.PI_CODING_AGENT_SESSION_DIR;
+  if (!dir) return undefined;
+  const scope = env.PI_SESSION_DIR_SCOPE;
+  if (!scope) return dir;
+  // Compare resolved paths, as the wrapper does with `pwd -P`.
+  let real = cwd;
+  try {
+    real = realpathSync(cwd);
+  } catch {}
+  return `${real}/`.startsWith(scope) && `${real}/` !== scope ? dir : undefined;
 }
